@@ -1,0 +1,78 @@
+# Review costs and connect this branch as nehitha-ss before creating services.
+# No secrets, existing service IDs or assumed public URLs are embedded here.
+services:
+  - type: web
+    name: aegis-northstar-console
+    runtime: node
+    plan: free
+    repo: https://github.com/nehitha-ss/aegis-agent-security
+    branch: feature/northstar-fastapi-integration
+    autoDeployTrigger: checksPass
+    buildCommand: npm run install:ci && node scripts/build-public.mjs
+    startCommand: node scripts/start-public.mjs
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 24.21.0
+      - key: NEXT_PUBLIC_NORTHSTAR_URL
+        sync: false
+      - key: AEGIS_INTEGRATION_URL
+        sync: false
+  - type: web
+    name: aegis-northstar-ingestion
+    runtime: node
+    plan: free
+    repo: https://github.com/nehitha-ss/aegis-agent-security
+    branch: feature/northstar-fastapi-integration
+    autoDeployTrigger: checksPass
+    buildCommand: npm run install:ci
+    startCommand: node integration/server.mjs
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 24.21.0
+      - key: AEGIS_INTEGRATION_HOST
+        value: 0.0.0.0
+      - key: AEGIS_INTEGRATION_PORT
+        value: '10000'
+      - key: AEGIS_INTEGRATION_DB
+        value: .integration-data/aegis.sqlite
+      - key: AEGIS_OWNER_KEYS
+        sync: false
+      - key: AEGIS_BOOTSTRAP_APPS
+        sync: false
+      - key: AEGIS_ORIGIN
+        sync: false
+  - type: web
+    name: northstar-finance-demo
+    runtime: python
+    plan: free
+    repo: https://github.com/nehitha-ss/aegis-agent-security
+    branch: feature/northstar-fastapi-integration
+    autoDeployTrigger: checksPass
+    buildCommand: pip install -r python/requirements.lock.txt ./python/connector
+    startCommand: python -m uvicorn northstar.app:app --app-dir python --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.14
+      - key: NORTHSTAR_DB
+        value: .integration-data/northstar.sqlite
+      - key: NORTHSTAR_OWNER_PASSWORD
+        generateValue: true
+      - key: NORTHSTAR_CUSTOMER_PASSWORD
+        generateValue: true
+      - key: NORTHSTAR_DEMO_RUN_KEY
+        generateValue: true
+      - key: NORTHSTAR_ENABLE_UNSAFE_DEMO
+        value: 'false'
+      - key: NORTHSTAR_DIRECT_CUSTOMER_DEMO
+        value: 'true'
+      - key: AEGIS_ENDPOINT
+        sync: false
+      - key: AEGIS_APP_ID
+        sync: false
+      - key: AEGIS_CONNECTION_KEY
+        sync: false
+      - key: AEGIS_PSEUDONYM_KEY
+        generateValue: true
