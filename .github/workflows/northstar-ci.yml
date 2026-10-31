@@ -1,0 +1,30 @@
+name: Northstar deployment checks
+on:
+  push:
+    branches: [feature/northstar-fastapi-integration]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm run install:ci
+      - run: python -m pip install -r python/requirements.lock.txt ./python/connector
+      - run: npm run test:integration
+      - run: python -m pytest python/tests -q
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npm run build
+      - run: node scripts/build-public.mjs
+        env:
+          NEXT_PUBLIC_NORTHSTAR_URL: https://finance.example.invalid
+          AEGIS_INTEGRATION_URL: https://ingestion.example.invalid
