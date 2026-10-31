@@ -1,0 +1,47 @@
+{
+  "source": "https://aegis-deputy-detector.vercel.app",
+  "kind": "Published client build snapshot, not original editable source",
+  "modifications": "Immutable asset URL prefix and local integration bridge only",
+  "assets": [
+    {
+      "url": "https://aegis-deputy-detector.vercel.app/_next/static/immutable/chunks/0c0hxoamwjsbw.js",
+      "sha256": "0973c1d64c88adc8e3c950410cb58b288f72118d5965b78049438deb8f2f9683",
+      "bytes": 112594
+    },
+    {
+      "url": "https://aegis-deputy-detector.vercel.app/_next/static/immutable/chunks/10mvhh9t-v100.js",
+      "sha256": "16e13d0688dd3bd6daf7e4720d6cce666bc08886ab3e3ba1064bad8cee967b4c",
+      "bytes": 20714
+    },
+    {
+      "url": "https://aegis-deputy-detector.vercel.app/_next/static/immutable/chunks/1u5dkt19cfpt-.js",
+      "sha256": "89321eca3f551de5d157fb103cfd21911d3ed3412da56e0c7c08c96d27f5a66f",
+      "bytes": 234736
+    },
+    {
+      "url": "https://aegis-deputy-detector.vercel.app/_next/static/immutable/chunks/204wcoeh5mng_.js",
+      "sha256": "65a0c30e778c1022573d3a9c9e53f2881ce6825c19c3afede7e7efd3950315e1",
+      "bytes": 179183
+    },
+    {
+      "url": "https://aegis-deputy-detector.vercel.app/_next/static/immutable/chunks/2corl6wyj4669.js",
+      "sha256": "34ed6abf4c6d0d1bb3dc56d3f133d2a5dbc3a3c89c791deab314e27143ac14ce",
+      "bytes": 14377
+    },
+    {
+      "url": "https://aegis-deputy-detector.vercel.app/_next/static/immutable/chunks/3ge2arl5jbwi1.js",
+      "sha256": "426ca624560e9c2bdd54ff73dcdca011b13a232cd53c2b4f226a19cc435d0ce3",
+      "bytes": 229631
+    },
+    {
+      "url": "https://aegis-deputy-detector.vercel.app/_next/static/immutable/chunks/3ptd59_69ssz9.css",
+      "sha256": "d652564c859849dd7bd68cd6b5411c6fbf73937ef4fedae4c34e31b0a732f858",
+      "bytes": 187463
+    },
+    {
+      "url": "https://aegis-deputy-detector.vercel.app/_next/static/immutable/chunks/turbopack-1epuvezsydq8o.js",
+      "sha256": "deaa88ceffc073238849afaaf19c092e5ef168b9b8cfd16fa54458b682e41e46",
+      "bytes": 9718
+    }
+  ]
+}
