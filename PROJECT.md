@@ -124,6 +124,16 @@ Public deployment preparation now targets the nehitha-ss account and the existin
 dedicated feature branch only. `render.yaml`, CI checks and a separate Node/Next
 public build support three free services with temporary SQLite storage. Three new Render Free services are deployed and verified as nehitha-ss. The public AEGIS URL is https://aegis-northstar-console.onrender.com/ and the finance entry is https://northstar-finance-demo.onrender.com/demo/open. Authenticated correlated reports were verified end to end; Linux CI passed all 20 tests and both builds. Free-only hosting is approved, with restart/reset limits. See PUBLISHING.md.
 
+Northstar now requests an authenticated AEGIS preflight decision before a
+fictional statement or transfer reaches its protected service branch. The default
+and Render configuration are fail-closed enforcement: unavailable or denying
+verification releases no statement and commits no transfer. The preflight checks
+caller identity, tenant, caller and helper authority, delegated caller context,
+helper-only trust, and confused-deputy indicators; only pseudonymous allowlisted
+evidence reaches AEGIS. Received evidence records when a risky delegated path was
+blocked before resource access. Monitoring-only operation remains an explicit
+local environment option.
+
 Integrations now follows the Chain Guard screenshot's access flow: shared public
 demo code `stuportal123`, backend-framework selection, and a collapsible read-only
 Northstar Finance sample. The sample view is explicitly illustrative, has no

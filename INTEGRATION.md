@@ -137,8 +137,8 @@ sign in as `owner`. This flag should stay false in ordinary use and public demos
 | --- | --- | --- |
 | Normal | Alex reads Alex’s statement | No bypass observed, risk 5 |
 | Direct denial | Alex requests Jamie’s statement | Denied at source, risk 10 |
-| Confused deputy | Broad helper reads Jamie’s statement without checking Alex | Confused deputy, risk 94 |
-| Cross tenant | Broad helper reads Riley’s Aurora Studio statement | Confused deputy + cross-tenant finding, risk 98 |
+| Confused deputy | Broad helper requests Jamie’s statement without checking Alex | Blocked confused deputy, risk 94 |
+| Cross tenant | Broad helper requests Riley’s Aurora Studio statement | Blocked confused deputy + cross-tenant finding, risk 98 |
 | Corrected | Corrected helper rejects Alex’s request for Riley’s statement | Denied at source, risk 10 |
 
 Each button creates an actual loopback HTTP request with a server-issued customer
@@ -190,18 +190,21 @@ Evidence is authenticated reporter evidence, not independent attestation of that
 application’s honesty. Risk numbers are deterministic demo policy scores, not
 probabilities, model confidence or a general security certification.
 
-## Monitoring versus enforcement
+## Verification and enforcement
 
-The integration is monitoring-only. It never claims to block a request. Corrected
-Northstar routes enforce identity, account ownership, tenant and allowed action
-before reading statements or updating fictional balances. Transfers are atomic
-SQLite transactions with positive, bounded amounts and balance checks.
+Northstar sends a strict, pseudonymous three-stage evidence set to AEGIS before a
+protected statement or transfer can proceed. AEGIS verifies caller and helper
+authority, tenant consistency, caller-context propagation, helper-only trust and
+confused-deputy indicators. With the default `AEGIS_ENFORCEMENT_MODE=enforce`, a
+deny, invalid response or unavailable AEGIS service fails closed: Northstar does
+not read the statement or commit the fictional transfer. Transfers still re-check
+ownership, tenant, recipient and balance inside their atomic SQLite transaction.
 
-Normal customer report delivery runs as a bounded best-effort response background
-task. An unavailable AEGIS or invalid key is logged without tokens and does not fail
-the customer operation. Owner lab receipts wait for the bounded delivery attempt
-so they can state whether reporting succeeded. There is no durable report retry
-queue: delivery failures may lose events and appear as unknown/incomplete flows.
+Each protected request is then recorded as a separate evidence flow. Statement
+contents, balances, credentials, cookies and raw request bodies never reach AEGIS.
+Setting `AEGIS_ENFORCEMENT_MODE=monitor` is permitted only for explicit local
+demonstration; it preserves Northstar’s own authorisation checks but does not turn
+an unavailable AEGIS service into an allow decision.
 
 ## Access boundaries and storage
 

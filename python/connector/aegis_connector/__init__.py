@@ -1,4 +1,4 @@
-"""Server-side AEGIS monitoring connector. No browser credentials or body capture."""
+"""Server-side AEGIS verification and evidence connector. No browser credentials or body capture."""
 from contextvars import ContextVar
 from datetime import datetime, timezone
 import hashlib
@@ -79,3 +79,23 @@ class AegisConnector:
             self.failed += 1
             logging.getLogger("aegis_connector").warning("AEGIS report delivery failed; customer operation remains independent")
             return False
+
+    async def verify(self, events):
+        """Get an AEGIS decision before a protected operation.
+
+        Verification is fail-closed at the caller when enforcement is enabled;
+        this method never returns credentials, account contents or raw requests.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout, trust_env=False) as client:
+                response = await client.post(self.endpoint + "/v1/verify", json={"events": events},
+                                             headers={"X-Aegis-App-Id": self.application_id, "Authorization": "Bearer " + self.connection_key})
+                response.raise_for_status()
+                result = response.json()
+                if result.get("decision") not in {"ALLOW", "DENY"} or not isinstance(result.get("decision_id"), str):
+                    raise ValueError("Invalid AEGIS verification response")
+                return result
+        except (httpx.HTTPError, ValueError):
+            self.failed += 1
+            logging.getLogger("aegis_connector").warning("AEGIS verification failed; protected operation was not released")
+            return {"verified": False, "decision": "DENY", "analysis": {"risk": 100, "explanation": "AEGIS verification was unavailable."}}

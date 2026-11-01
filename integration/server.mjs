@@ -9,7 +9,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { z } from "zod";
-import { evaluateDelegatedAccess } from "../lib/delegated-policy.mjs";
+import { evaluateDelegatedAccess, evaluateDelegatedPreflight } from "../lib/delegated-policy.mjs";
 
 const digest = (s) => createHash("sha256").update(s).digest("hex");
 const equal = (a, b) => {
@@ -33,7 +33,8 @@ const db = new DatabaseSync(dbPath);
 db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS apps(id TEXT PRIMARY KEY,owner TEXT NOT NULL,name TEXT NOT NULL,key_hash TEXT NOT NULL,created TEXT NOT NULL,last_seen TEXT);
 CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY,owner TEXT NOT NULL,expires INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS events(app TEXT NOT NULL,id TEXT NOT NULL,flow TEXT NOT NULL,phase TEXT NOT NULL,data TEXT NOT NULL,received TEXT NOT NULL,PRIMARY KEY(app,id),UNIQUE(app,flow,phase),FOREIGN KEY(app) REFERENCES apps(id));`);
+CREATE TABLE IF NOT EXISTS events(app TEXT NOT NULL,id TEXT NOT NULL,flow TEXT NOT NULL,phase TEXT NOT NULL,data TEXT NOT NULL,received TEXT NOT NULL,PRIMARY KEY(app,id),UNIQUE(app,flow,phase),FOREIGN KEY(app) REFERENCES apps(id));
+CREATE TABLE IF NOT EXISTS decisions(app TEXT NOT NULL,flow TEXT NOT NULL,request_hash TEXT NOT NULL,decision_id TEXT NOT NULL,data TEXT NOT NULL,created TEXT NOT NULL,PRIMARY KEY(app,flow),FOREIGN KEY(app) REFERENCES apps(id));`);
 const pseudo = z.string().regex(/^p_[a-f0-9]{24}$/);
 // Free hosting has ephemeral disks. Re-establish only explicitly provisioned
 // applications after a restart; owner and connection keys remain host secrets.
@@ -181,6 +182,33 @@ const server = http.createServer(async (req, res) => {
         analysis: evaluateDelegatedAccess(flow),
       });
     }
+    if (path === "/v1/verify" && req.method === "POST") {
+      const id = req.headers["x-aegis-app-id"];
+      const key = req.headers.authorization?.replace(/^Bearer /, "") || "";
+      const app = typeof id === "string" ? db.prepare("SELECT * FROM apps WHERE id=?").get(id) : null;
+      if (!app || !key || !equal(digest(key), app.key_hash))
+        return reply(res, 401, { error: "Invalid application credentials" });
+      if (!limit(`${id}:verify`, 300))
+        return reply(res, 429, { error: "Verification rate limit" });
+      const parsed = z.object({ events: z.array(schema).length(3) }).strict().safeParse(await body(req));
+      if (!parsed.success)
+        return reply(res, 400, { error: "A complete, allowlisted three-stage request is required" });
+      const events = parsed.data.events;
+      const flow = events[0].correlation_id;
+      if (events.some((event) => event.correlation_id !== flow))
+        return reply(res, 400, { error: "Verification stages must share one correlation ID" });
+      const requestHash = digest(JSON.stringify(events));
+      const existing = db.prepare("SELECT * FROM decisions WHERE app=? AND flow=?").get(id, flow);
+      if (existing) {
+        if (existing.request_hash !== requestHash)
+          return reply(res, 409, { error: "Correlation ID already verified with different evidence" });
+        return reply(res, 200, JSON.parse(existing.data));
+      }
+      const analysis = evaluateDelegatedPreflight(events);
+      const response = { verified: true, decision_id: randomUUID(), decision: analysis.decision, analysis };
+      db.prepare("INSERT INTO decisions VALUES(?,?,?,?,?,?)").run(id, flow, requestHash, response.decision_id, JSON.stringify(response), new Date().toISOString());
+      return reply(res, 201, response);
+    }
     if (path === "/owner/login" && req.method === "POST") {
       if (req.headers.origin !== origin)
         return reply(res, 403, { error: "Origin rejected" });
@@ -310,6 +338,6 @@ server.listen(
   process.env.AEGIS_INTEGRATION_HOST || "127.0.0.1",
   () =>
     console.log(
-      "AEGIS integration service listening; monitoring only.",
+      "AEGIS integration service listening; verification and evidence endpoints ready.",
     ),
 );

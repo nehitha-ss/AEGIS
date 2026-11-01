@@ -24,6 +24,7 @@ DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 ORIGIN = (os.environ.get("NORTHSTAR_ORIGIN") or ("https://" + os.environ["RENDER_EXTERNAL_HOSTNAME"] if os.environ.get("RENDER_EXTERNAL_HOSTNAME") else "http://localhost:8000")).rstrip("/")
 DEMO = os.environ.get("NORTHSTAR_ENABLE_UNSAFE_DEMO", "false").lower() == "true"
 DIRECT_CUSTOMER_DEMO = os.environ.get("NORTHSTAR_DIRECT_CUSTOMER_DEMO", "false").lower() == "true"
+ENFORCE_AEGIS = os.environ.get("AEGIS_ENFORCEMENT_MODE", "enforce").lower() == "enforce"
 OWNER_PASSWORD = os.environ.get("NORTHSTAR_OWNER_PASSWORD", "")
 CUSTOMER_PASSWORD = os.environ.get("NORTHSTAR_CUSTOMER_PASSWORD", "")
 RUN_KEY = os.environ.get("NORTHSTAR_DEMO_RUN_KEY", "")
@@ -122,7 +123,7 @@ async def request_context(request, call_next):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "fictional": True, "monitoring": True}
+    return {"status": "ok", "fictional": True, "aegis_enforcement": "enforce" if ENFORCE_AEGIS else "monitor"}
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -223,29 +224,40 @@ def report_chain(request, person, account, allowed, *, vulnerable=False, route="
         correlation_id.reset(cid_token)
 
 
-def statement_service(request, person, account_id, vulnerable=False):
+async def verify_with_aegis(request, person, account, *, vulnerable, route):
+    """Verify a fictional delegated action before the resource branch is opened."""
+    proposed_events = report_chain(request, person, account, True, vulnerable=vulnerable, route=route)
+    if not ENFORCE_AEGIS:
+        return {"verified": False, "decision": "MONITOR", "analysis": {"risk": None, "explanation": "AEGIS enforcement is disabled for this local demo."}}
+    return await connector.verify(proposed_events)
+
+
+async def statement_service(request, person, account_id, vulnerable=False):
     with database() as db:
         row = db.execute("SELECT * FROM accounts WHERE id=?", (account_id,)).fetchone()
         if not row:
             raise HTTPException(404, "Account not found")
         account = dict(row)
-        allowed = vulnerable or policy(person, account, "statement.read")
-        events = report_chain(request, person, account, allowed, vulnerable=vulnerable)
-        # Resource access is inside the authorised branch. In vulnerable owner-only
-        # runs the broad service credential is deliberately sufficient for fake data.
+    northstar_allowed = vulnerable or policy(person, account, "statement.read")
+    verification = await verify_with_aegis(request, person, account, vulnerable=vulnerable, route="statement")
+    allowed = northstar_allowed and verification["decision"] in {"ALLOW", "MONITOR"}
+    events = report_chain(request, person, account, allowed, vulnerable=vulnerable)
+    # Resource access is inside the authorised branch. In vulnerable owner-only
+    # runs the broad service credential is deliberately sufficient for fake data.
+    with database() as db:
         transactions = [dict(x) for x in db.execute("SELECT label,amount,created FROM transactions WHERE account=?", (account_id,))] if allowed else []
-    return allowed, account, transactions, events
+    return allowed, account, transactions, events, verification
 
 
 @app.get("/statements/{account_id}", response_class=HTMLResponse)
-def statement(request: Request, account_id: str):
+async def statement(request: Request, account_id: str):
     person = current(request)
-    allowed, account, transactions, events = statement_service(request, person, account_id)
-    return templates.TemplateResponse(request=request, name="statement.html", status_code=200 if allowed else 403, context={"person": person, "allowed": allowed, "account": account if allowed else None, "transactions": transactions, "correlation": request.state.correlation_id}, background=BackgroundTask(connector.send, events))
+    allowed, account, transactions, events, verification = await statement_service(request, person, account_id)
+    return templates.TemplateResponse(request=request, name="statement.html", status_code=200 if allowed else 403, context={"person": person, "allowed": allowed, "account": account if allowed else None, "transactions": transactions, "correlation": request.state.correlation_id, "verification": verification}, background=BackgroundTask(connector.send, events))
 
 
 @app.post("/transfers", response_class=HTMLResponse)
-def transfer(request: Request, source: str = Form(), destination: str = Form(), amount: str = Form(), csrf: str = Form()):
+async def transfer(request: Request, source: str = Form(), destination: str = Form(), amount: str = Form(), csrf: str = Form()):
     person = current(request)
     verify_form(request, person, csrf)
     try:
@@ -256,14 +268,25 @@ def transfer(request: Request, source: str = Form(), destination: str = Form(), 
     except (InvalidOperation, ValueError, OverflowError):
         raise HTTPException(400, "Enter a positive amount with at most two decimals (maximum 100,000)")
     with database() as db:
-        db.execute("BEGIN IMMEDIATE")
         src = db.execute("SELECT * FROM accounts WHERE id=?", (source,)).fetchone()
         dst = db.execute("SELECT * FROM accounts WHERE id=?", (destination,)).fetchone()
-        if not src or not dst:
+    if not src or not dst:
+        raise HTTPException(404, "Account not found")
+    src, dst = dict(src), dict(dst)
+    northstar_allowed = policy(person, src, "transfer.create") and dst["tenant"] == person["tenant"] and source != destination
+    verification = await verify_with_aegis(request, person, src, vulnerable=False, route="transfer")
+    allowed = northstar_allowed and verification["decision"] in {"ALLOW", "MONITOR"}
+    events = report_chain(request, person, src, allowed, route="transfer")
+    with database() as db:
+        db.execute("BEGIN IMMEDIATE")
+        current_src = db.execute("SELECT * FROM accounts WHERE id=?", (source,)).fetchone()
+        current_dst = db.execute("SELECT * FROM accounts WHERE id=?", (destination,)).fetchone()
+        if not current_src or not current_dst:
             raise HTTPException(404, "Account not found")
-        src, dst = dict(src), dict(dst)
-        allowed = policy(person, src, "transfer.create") and dst["tenant"] == person["tenant"] and source != destination
-        events = report_chain(request, person, src, allowed, route="transfer")
+        src, dst = dict(current_src), dict(current_dst)
+        # Re-check mutable business conditions after the preflight wait, while the
+        # balance update is protected by one SQLite transaction.
+        allowed = allowed and policy(person, src, "transfer.create") and dst["tenant"] == person["tenant"] and source != destination
         if allowed and src["balance"] >= cents:
             db.execute("UPDATE accounts SET balance=balance-? WHERE id=?", (cents, source))
             db.execute("UPDATE accounts SET balance=balance+? WHERE id=?", (cents, destination))
@@ -274,7 +297,7 @@ def transfer(request: Request, source: str = Form(), destination: str = Form(), 
             message, status = "Transfer denied: ownership, tenant, recipient or funds check failed.", 403
             for event in events:
                 event["outcome"] = "denied"
-    return templates.TemplateResponse(request=request, name="result.html", status_code=status, context={"person": person, "message": message, "correlation": request.state.correlation_id}, background=BackgroundTask(connector.send, events))
+    return templates.TemplateResponse(request=request, name="result.html", status_code=status, context={"person": person, "message": message, "correlation": request.state.correlation_id, "verification": verification}, background=BackgroundTask(connector.send, events))
 
 
 SCENARIOS = {"normal": ("acct-alex", False), "direct-denial": ("acct-jamie", False), "confused-deputy": ("acct-jamie", True), "cross-tenant": ("acct-riley", True), "corrected": ("acct-riley", False)}
@@ -329,6 +352,6 @@ async def demo_request(request: Request):
     account, unsafe = SCENARIOS[run["scenario"]]
     if unsafe and not DEMO:
         raise HTTPException(403, "Unsafe demo mode disabled")
-    allowed, _, _, events = statement_service(request, person, account, vulnerable=unsafe)
+    allowed, _, _, events, verification = await statement_service(request, person, account, vulnerable=unsafe)
     delivery = await connector.send(events)
-    return {"outcome": "allowed" if allowed else "denied", "correlation_id": request.state.correlation_id, "delivery": "received" if delivery else "failed (monitoring only)"}
+    return {"outcome": "allowed" if allowed else "denied", "correlation_id": request.state.correlation_id, "delivery": "received" if delivery else "failed", "aegis_decision": verification["decision"]}

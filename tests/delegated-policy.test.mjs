@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluateDelegatedAccess } from "../lib/delegated-policy.mjs";
+import { evaluateDelegatedAccess, evaluateDelegatedPreflight } from "../lib/delegated-policy.mjs";
 function chain(overrides = {}) {
   return ["customer", "helper", "resource"].map((phase) => ({
     phase,
@@ -47,13 +47,24 @@ test("conflicting correlated identities are unknown", () => {
   events[1].resource = "another";
   assert.equal(evaluateDelegatedAccess(events).verdict, "UNKNOWN");
 });
-test("a resource denial is not a successful bypass", () => {
+test("a denied confused-deputy path is recorded as prevented, not successful", () => {
   const result = evaluateDelegatedAccess(chain({ outcome: "denied" }));
-  assert.equal(result.verdict, "DENIED_AT_SOURCE");
-  assert.equal(result.findings.length, 0);
+  assert.equal(result.verdict, "BLOCKED_CONFUSED_DEPUTY");
+  assert.equal(result.findings[0].id, "CONFUSED_DEPUTY");
 });
 test("lost context alone does not prove a bypass", () => {
   const events = chain();
   for (const e of events) e.evidence.caller_authorized = true;
   assert.equal(evaluateDelegatedAccess(events).verdict, "NO_BYPASS_OBSERVED");
+});
+test("preflight allows complete caller-bound delegation and denies confused-deputy evidence", () => {
+  const safe = chain();
+  for (const event of safe) {
+    event.evidence.caller_authorized = true;
+    event.evidence.original_caller_checked = true;
+    event.evidence.caller_context_propagated = true;
+    event.evidence.resource_trusts_helper_only = false;
+  }
+  assert.equal(evaluateDelegatedPreflight(safe).decision, "ALLOW");
+  assert.equal(evaluateDelegatedPreflight(chain()).decision, "DENY");
 });

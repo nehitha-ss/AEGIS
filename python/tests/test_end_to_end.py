@@ -120,7 +120,7 @@ def test_01_authorised_and_direct_denial(stack):
 
 
 def test_02_owner_actual_scenarios_and_findings(stack):
-    expected = {"normal": "NO_BYPASS_OBSERVED", "direct-denial": "DENIED_AT_SOURCE", "confused-deputy": "CONFUSED_DEPUTY", "cross-tenant": "CONFUSED_DEPUTY", "corrected": "DENIED_AT_SOURCE"}
+    expected = {"normal": "NO_BYPASS_OBSERVED", "direct-denial": "DENIED_AT_SOURCE", "confused-deputy": "BLOCKED_CONFUSED_DEPUTY", "cross-tenant": "BLOCKED_CONFUSED_DEPUTY", "corrected": "DENIED_AT_SOURCE"}
     token = csrf(stack["operator"], "/owner")
     for scenario, verdict in expected.items():
         response = stack["operator"].post("/owner/scenarios", data={"csrf": token, "scenario": scenario})
@@ -131,6 +131,7 @@ def test_02_owner_actual_scenarios_and_findings(stack):
         if scenario == "cross-tenant":
             assert flow["analysis"]["risk"] == 98
             assert any(f["id"] == "CROSS_TENANT_ACCESS" for f in flow["analysis"]["findings"])
+            assert "outcome = denied" in response.text
         if scenario == "corrected":
             assert all(e["outcome"] == "denied" for e in flow["events"])
     assert stack["customer"].get("/owner").status_code == 403
@@ -190,6 +191,7 @@ def test_05_unknown_evidence_and_app_data_separation(stack):
 
 def test_06_disabled_unsafe_demo_and_unavailable_aegis(stack):
     # A separate Northstar process uses default-safe mode and an unreachable AEGIS.
+    # Enforced protected operations must fail closed rather than release data.
     finance_port = port()
     finance = f"http://127.0.0.1:{finance_port}"
     env = stack["env"] | {"NORTHSTAR_DB": str(stack["temp"] / "safe.sqlite"), "NORTHSTAR_ENABLE_UNSAFE_DEMO": "false", "NORTHSTAR_ORIGIN": finance, "NORTHSTAR_INTERNAL_URL": finance, "AEGIS_ENDPOINT": "http://127.0.0.1:1"}
@@ -204,10 +206,10 @@ def test_06_disabled_unsafe_demo_and_unavailable_aegis(stack):
         client.post("/logout", data={"csrf": token})
         client.post("/login", data={"username": "alex", "password": env["NORTHSTAR_CUSTOMER_PASSWORD"]})
         response = client.get("/statements/acct-alex")
-        assert response.status_code == 200
-        assert "Everyday account" in response.text
+        assert response.status_code == 403
+        assert "AEGIS DENY" in response.text
         token = csrf(client)
-        assert client.post("/transfers", data={"source": "acct-alex", "destination": "acct-jamie", "amount": "1", "csrf": token}).status_code == 200
+        assert client.post("/transfers", data={"source": "acct-alex", "destination": "acct-jamie", "amount": "1", "csrf": token}).status_code == 403
         assert client.get("/statements/acct-jamie").status_code == 403
 
 

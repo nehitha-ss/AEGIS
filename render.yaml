@@ -76,3 +76,5 @@ services:
         sync: false
       - key: AEGIS_PSEUDONYM_KEY
         generateValue: true
+      - key: AEGIS_ENFORCEMENT_MODE
+        value: enforce
